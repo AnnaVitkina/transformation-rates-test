@@ -360,6 +360,37 @@ def _main_words(text):
     return words
 
 
+def _norm_matrix_name(s):
+    return ' '.join((s or '').strip().split()).upper()
+
+
+def _find_matrix_name_in_lookup(canonical_name, matrix_names):
+    want = _norm_matrix_name(canonical_name)
+    for mn in matrix_names:
+        if _norm_matrix_name(mn) == want:
+            return mn
+    return None
+
+
+def _explicit_third_country_matrix(service_upper, matrix_names):
+    """Fixed third-country service -> matrix mapping (must match transform_main_costs.py)."""
+    if 'THIRD' not in service_upper or 'COUNTRY' not in service_upper:
+        return None
+    if 'ECONOMY' in service_upper and 'SELECT' in service_upper:
+        return _find_matrix_name_in_lookup(
+            'DHL ECONOMY SELECT THIRD COUNTRY ZONE MATRIX', matrix_names
+        )
+    if 'DOMESTIC' in service_upper:
+        return _find_matrix_name_in_lookup(
+            'DHL EXPRESS DOMESTIC THIRD COUNTRY ZONE MATRIX', matrix_names
+        )
+    if 'WORLDWIDE' in service_upper:
+        return _find_matrix_name_in_lookup(
+            'DHL EXPRESS THIRD COUNTRY ZONE MATRIX', matrix_names
+        )
+    return None
+
+
 def _find_matrix_for_service(zoning_lookup, service):
     """
     Given a service type name (e.g. "DHL EXPRESS THIRD COUNTRY"), find which matrix
@@ -373,6 +404,7 @@ def _find_matrix_for_service(zoning_lookup, service):
     We need to match them up despite these differences.
 
     MATCHING STRATEGY (tries each approach in order, returns the first match found):
+      0. Explicit third-country service -> matrix (_explicit_third_country_matrix)
       1. Direct substring: does the service name appear inside the matrix name, or vice versa?
       2. Strip " ZONE MATRIX" from the matrix name, then try substring again.
       3. Word-level match: do all meaningful words from the matrix name appear in the service?
@@ -383,10 +415,15 @@ def _find_matrix_for_service(zoning_lookup, service):
     service = (service or '').strip()
     if not service:
         return None
+    service_upper = service.upper()
     service_words = _main_words(service)
 
     # Get all unique matrix names from the lookup (ignoring the zone letter part of each key)
-    matrix_names = sorted{mn for (mn, _) in zoning_lookup}
+    matrix_names = {mn for (mn, _) in zoning_lookup}
+
+    explicit = _explicit_third_country_matrix(service_upper, matrix_names)
+    if explicit:
+        return explicit
 
     # --- Attempt 1: direct substring match ---
     for mn in matrix_names:
