@@ -335,6 +335,50 @@ def _main_words(text):
     return words
 
 
+def _norm_matrix_name(s):
+    """Normalize matrix/service strings for comparison (collapse whitespace, upper)."""
+    return ' '.join((s or '').strip().split()).upper()
+
+
+def _find_matrix_name_in_lookup(canonical_name, matrix_names):
+    """Return the actual matrix name from lookup if it matches canonical (spacing/case tolerant)."""
+    want = _norm_matrix_name(canonical_name)
+    for mn in matrix_names:
+        if _norm_matrix_name(mn) == want:
+            return mn
+    return None
+
+
+def _explicit_third_country_matrix(service_upper, matrix_names):
+    """
+    Fixed mapping: MainCosts service line -> ZoningMatrix name.
+
+    Without this, Attempt 0 returned the first non-domestic third-country matrix from an
+    unordered set — often DHL ECONOMY SELECT THIRD COUNTRY ZONE MATRIX before DHL EXPRESS
+    THIRD COUNTRY ZONE MATRIX, so WORLDWIDE THIRD COUNTRY lanes used the wrong grid.
+
+    Mapping (only if that matrix exists in zoning_lookup):
+      DHL EXPRESS WORLDWIDE THIRD COUNTRY  -> DHL EXPRESS THIRD COUNTRY ZONE MATRIX
+      DHL EXPRESS DOMESTIC THIRD COUNTRY     -> DHL EXPRESS DOMESTIC THIRD COUNTRY ZONE MATRIX
+      DHL ECONOMY SELECT THIRD COUNTRY       -> DHL ECONOMY SELECT THIRD COUNTRY ZONE MATRIX
+    """
+    if 'THIRD' not in service_upper or 'COUNTRY' not in service_upper:
+        return None
+    if 'ECONOMY' in service_upper and 'SELECT' in service_upper:
+        return _find_matrix_name_in_lookup(
+            'DHL ECONOMY SELECT THIRD COUNTRY ZONE MATRIX', matrix_names
+        )
+    if 'DOMESTIC' in service_upper:
+        return _find_matrix_name_in_lookup(
+            'DHL EXPRESS DOMESTIC THIRD COUNTRY ZONE MATRIX', matrix_names
+        )
+    if 'WORLDWIDE' in service_upper:
+        return _find_matrix_name_in_lookup(
+            'DHL EXPRESS THIRD COUNTRY ZONE MATRIX', matrix_names
+        )
+    return None
+
+
 def _find_matrix_for_service(zoning_lookup, service):
     """
     Given a service type name (e.g. "DHL EXPRESS THIRD COUNTRY"), find which matrix
@@ -348,9 +392,11 @@ def _find_matrix_for_service(zoning_lookup, service):
     We need to match them up despite these differences.
 
     MATCHING STRATEGY (tries each approach in order, returns the first match found):
-      1. Direct substring: does the service name appear inside the matrix name, or vice versa?
-      2. Strip " ZONE MATRIX" from the matrix name, then try substring again.
-      3. Word-level match: do all meaningful words from the matrix name appear in the service?
+      0. Explicit third-country service -> matrix (_explicit_third_country_matrix)
+      1. Attempt 0 legacy: WORLDWIDE THIRD COUNTRY non-domestic matrices
+      2. Direct substring: does the service name appear inside the matrix name, or vice versa?
+      3. Strip " ZONE MATRIX" from the matrix name, then try substring again.
+      4. Word-level match: do all meaningful words from the matrix name appear in the service?
          e.g. {"DHL", "EXPRESS", "THIRD", "COUNTRY"} are all present in "DHL EXPRESS THIRD COUNTRY"
 
     Returns the matching matrix name, or None if no match is found.
@@ -362,7 +408,11 @@ def _find_matrix_for_service(zoning_lookup, service):
     service_words = _main_words(service)
 
     # Get all unique matrix names from the lookup (ignoring the zone letter part of each key)
-    matrix_names = sorted{mn for (mn, _) in zoning_lookup}
+    matrix_names = {mn for (mn, _) in zoning_lookup}
+
+    explicit = _explicit_third_country_matrix(service_upper, matrix_names)
+    if explicit:
+        return explicit
 
     # --- Attempt 0: WORLDWIDE THIRD COUNTRY must use the non-Domestic matrix ---
     # Service "DHL EXPRESS WORLDWIDE THIRD COUNTRY" -> "DHL EXPRESS THIRD COUNTRY ZONE MATRIX"
