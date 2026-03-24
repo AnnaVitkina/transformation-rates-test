@@ -386,7 +386,7 @@ def _find_matrix_for_service(zoning_lookup, service):
     service_words = _main_words(service)
 
     # Get all unique matrix names from the lookup (ignoring the zone letter part of each key)
-    matrix_names = {mn for (mn, _) in zoning_lookup}
+    matrix_names = sorted{mn for (mn, _) in zoning_lookup}
 
     # --- Attempt 1: direct substring match ---
     for mn in matrix_names:
